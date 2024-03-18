@@ -3,14 +3,14 @@ import sys
 sys.path.append(".")
 
 import covalent_cloud as cc
-from workflow import workflow
+from finrl_workflow import workflow
 
 
 if __name__ == "__main__":
-
     RUNID_FILE = "runid_status.csv"
     RESULTS_FILE = "results.csv"
     VOLUME_NAME = "/finrl"
+
     TRAIN_START_DATE = '2009-01-01'
     TRAIN_END_DATE = '2020-07-01'
     TRADE_START_DATE = '2020-07-01'
