@@ -1,0 +1,4 @@
+covalent-cloud
+numpy==1.23.5
+git+https://github.com/AI4Finance-Foundation/FinRL.git
+stable-baselines3==2.2.1
