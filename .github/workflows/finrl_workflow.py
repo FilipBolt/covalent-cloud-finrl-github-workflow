@@ -56,8 +56,6 @@ gpu_executor = cc.CloudExecutor(
     num_cpus=4,
     time_limit=60*60
 )
-# large_cpu_exec = gpu_exec
-# default_exec = 'local'
 VOLUME_NAME = "finrl"
 
 
@@ -97,6 +95,7 @@ def download_stock_data(start_date, end_date):
     ]
     processed_full = processed_full.sort_values(['date', 'tic'])
     processed_full = processed_full.fillna(0)
+
     # save to volume
     save_path = Path("/volumes") / Path(VOLUME_NAME) / "stock_data.csv"
     # create the directory if it does not exist
@@ -142,10 +141,12 @@ def train_rl_model(train_data_path, rl_algorithm='ddpg', alg_params={}):
         model=model_rl, tb_log_name=rl_algorithm,
         total_timesteps=timesteps
     )
+
     # save model
     TRAINED_MODEL_DIR = Path("/volumes") / Path(VOLUME_NAME)
     model_folder = f"agent_{rl_algorithm}"
     model_save_path = TRAINED_MODEL_DIR / model_folder
+
     # save model to tempfile
     tempfile = f"{model_folder}_{uuid.uuid4()}"
     with open(f'/tmp/{tempfile}.zip', 'wb') as f:
@@ -189,13 +190,11 @@ def backtest(trained_model_path, test_data_path, algorithm):
         df=test_data, turbulence_threshold=70,
         risk_indicator_col='vix', **env_kwargs
     )
-    # posix path to string
-    print("going to load model from path", str(trained_model_path))
+    # load model
     if "ppo" in str(trained_model_path):
         trained_model = PPO.load(trained_model_path)
     elif "ddpg" in str(trained_model_path):
         trained_model = DDPG.load(trained_model_path)
-    print(f"loaded model {trained_model_path}")
 
     df_account_value, df_actions = DRLAgent.DRL_prediction(
         model=trained_model,
@@ -217,6 +216,7 @@ def split_data_by_date(
     data_part = data_split(
         data_full, start_date, end_date
     )
+    # save to volume
     save_path = Path("/volumes") / Path(VOLUME_NAME) / output_file_name
     data_part.to_csv(save_path)
     return save_path
@@ -240,9 +240,6 @@ def get_dji_data(start_date, end_date):
 
 @ct.electron(executor=cpu_executor)
 def plot_results(performance_data):
-    # save_path = Path ("/volumes") / Path(VOLUME_NAME) / "portfolio_value.png"
-    # save_path.parent.mkdir(parents=True, exist_ok=True)
-
     df = pd.concat(performance_data, axis=1)
     # start new plot
     plt.clf()
@@ -266,8 +263,6 @@ def plot_results(performance_data):
     plt.xticks(desired_ticks, labels=desired_ticks)
     legend_labels = ["DDPG", "PPO", "Dow Jones Industrial Average"]
     plt.legend(legend_labels)
-    # save plot
-    # plt.savefig(save_path)
     return plt
 
 
