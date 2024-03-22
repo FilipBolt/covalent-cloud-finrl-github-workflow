@@ -73,7 +73,7 @@ def write_result_to_file(runid, result, results_file):
     result.result.load()
     value = result.result.value
     # save plot to file
-    value.savefig(f"{runid}.png")
+    value.save(f"{runid}.png")
 
     # Check if results file exists
     if not os.path.exists(results_file):

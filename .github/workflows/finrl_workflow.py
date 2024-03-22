@@ -7,6 +7,7 @@ import pandas as pd
 import covalent as ct
 import covalent_cloud as cc
 from pathlib import Path
+from PIL import Image
 import matplotlib.pyplot as plt
 
 from finrl.meta.preprocessor.yahoodownloader import YahooDownloader
@@ -263,7 +264,10 @@ def plot_results(performance_data):
     plt.xticks(desired_ticks, labels=desired_ticks)
     legend_labels = ["DDPG", "PPO", "Dow Jones Industrial Average"]
     plt.legend(legend_labels)
-    return plt
+
+    plt.savefig('/tmp/plot.png')
+    # open image
+    return Image.open('/tmp/plot.png')
 
 
 @ct.lattice(workflow_executor=gpu_executor, executor=gpu_executor)
@@ -310,12 +314,12 @@ if __name__ == '__main__':
         TRADE_START_DATE, TRADE_END_DATE,
         algorithm_params={
             "ddpg": {
-                "timesteps": 50000, "model_kwargs": {
+                "timesteps": 5, "model_kwargs": {
                     "batch_size": 2048
                 }
             },
             "ppo": {
-                "timesteps": 50000, "model_kwargs": {}
+                "timesteps": 5, "model_kwargs": {}
             }
         }
     )
