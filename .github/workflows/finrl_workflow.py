@@ -1,11 +1,12 @@
 import os
+import uuid
+import shutil
 import itertools
 import pandas as pd
 
 import covalent as ct
 import covalent_cloud as cc
 from pathlib import Path
-from PIL import Image
 import matplotlib.pyplot as plt
 
 from finrl.meta.preprocessor.yahoodownloader import YahooDownloader
@@ -15,6 +16,14 @@ from finrl import config_tickers
 from finrl.meta.env_stock_trading.env_stocktrading import StockTradingEnv
 from finrl.agents.stablebaselines3.models import DRLAgent
 from stable_baselines3 import DDPG, PPO
+
+import sys
+
+sys.path.append(".")
+
+from utils import ( # noqa
+    Status, update_runid, check_and_update_status # noqa
+) # noqa
 
 
 cc.save_api_key(os.environ["CC_API_KEY"])
@@ -40,16 +49,16 @@ cpu_executor = cc.CloudExecutor(
     time_limit=60*60
 )
 gpu_executor = cc.CloudExecutor(
-    # num_gpus=1,
+    num_gpus=1,
     env="fin-rl",
-    # gpu_type="v100",
+    gpu_type="v100",
     memory=16384,
     num_cpus=4,
     time_limit=60*60
 )
 # large_cpu_exec = gpu_exec
 # default_exec = 'local'
-VOLUME_NAME = "/finrl"
+VOLUME_NAME = "finrl"
 
 
 @ct.electron(executor=cpu_executor)
@@ -89,7 +98,9 @@ def download_stock_data(start_date, end_date):
     processed_full = processed_full.sort_values(['date', 'tic'])
     processed_full = processed_full.fillna(0)
     # save to volume
-    save_path = Path(VOLUME_NAME) / "stock_data.csv"
+    save_path = Path("/volumes") / Path(VOLUME_NAME) / "stock_data.csv"
+    # create the directory if it does not exist
+    save_path.parent.mkdir(parents=True, exist_ok=True)
     processed_full.to_csv(save_path, index=False)
     return save_path
 
@@ -132,17 +143,25 @@ def train_rl_model(train_data_path, rl_algorithm='ddpg', alg_params={}):
         total_timesteps=timesteps
     )
     # save model
-    TRAINED_MODEL_DIR = Path(VOLUME_NAME) / "models"
-    TRAINED_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    TRAINED_MODEL_DIR = Path("/volumes") / Path(VOLUME_NAME)
     model_folder = f"agent_{rl_algorithm}"
     model_save_path = TRAINED_MODEL_DIR / model_folder
-    trained_agent.save(model_save_path)
+    # save model to tempfile
+    tempfile = f"{model_folder}_{uuid.uuid4()}"
+    with open(f'/tmp/{tempfile}.zip', 'wb') as f:
+        trained_agent.save(f)
+
+    # move to the correct location
+    shutil.move(f'/tmp/{tempfile}.zip', model_save_path)
+
+    # save in another way, not zip file
     return model_save_path
 
 
 @ct.electron(executor=gpu_executor)
-def backtest(trained_model_path, test_data_path):
+def backtest(trained_model_path, test_data_path, algorithm):
     test_data = pd.read_csv(test_data_path)
+    print("loaded test data")
     test_data = test_data.set_index(test_data.columns[0])
     test_data.index.names = ['']
     stock_dimension = len(test_data.tic.unique())
@@ -171,10 +190,12 @@ def backtest(trained_model_path, test_data_path):
         risk_indicator_col='vix', **env_kwargs
     )
     # posix path to string
+    print("going to load model from path", str(trained_model_path))
     if "ppo" in str(trained_model_path):
         trained_model = PPO.load(trained_model_path)
     elif "ddpg" in str(trained_model_path):
         trained_model = DDPG.load(trained_model_path)
+    print(f"loaded model {trained_model_path}")
 
     df_account_value, df_actions = DRLAgent.DRL_prediction(
         model=trained_model,
@@ -183,6 +204,8 @@ def backtest(trained_model_path, test_data_path):
     df_result = (
         df_account_value.set_index(df_account_value.columns[0])
     )
+
+    df_result.columns = [algorithm]
     return df_result
 
 
@@ -194,7 +217,7 @@ def split_data_by_date(
     data_part = data_split(
         data_full, start_date, end_date
     )
-    save_path = Path(VOLUME_NAME) / output_file_name
+    save_path = Path("/volumes") / Path(VOLUME_NAME) / output_file_name
     data_part.to_csv(save_path)
     return save_path
 
@@ -217,8 +240,8 @@ def get_dji_data(start_date, end_date):
 
 @ct.electron(executor=cpu_executor)
 def plot_results(performance_data):
-    save_folder = Path(VOLUME_NAME) / "graphs"
-    save_folder.mkdir(parents=True, exist_ok=True)
+    # save_path = Path ("/volumes") / Path(VOLUME_NAME) / "portfolio_value.png"
+    # save_path.parent.mkdir(parents=True, exist_ok=True)
 
     df = pd.concat(performance_data, axis=1)
     # start new plot
@@ -235,18 +258,17 @@ def plot_results(performance_data):
         df.index, df['dji'],
         label="Dow Jones Industrial Average", color='black', linestyle='dashed'
     )
+
     plt.plot(df.index, df['ppo'], label="PPO", color='red')
     plt.plot(df.index, df['ddpg'], label="DDPG", color='green')
 
     desired_ticks = df.index[::int(len(df.index) / 5)]
     plt.xticks(desired_ticks, labels=desired_ticks)
     legend_labels = ["DDPG", "PPO", "Dow Jones Industrial Average"]
-    plt.legend()
-
+    plt.legend(legend_labels)
     # save plot
-    plt.savefig(save_folder / "portfolio_value.png")
-    # open and return image
-    return Image.open(save_folder / "portfolio_value.png")
+    # plt.savefig(save_path)
+    return plt
 
 
 @ct.lattice(workflow_executor=gpu_executor, executor=gpu_executor)
@@ -269,8 +291,7 @@ def workflow(
         trained_model_path = train_rl_model(
             train_data_path, algorithm, algorithm_params.get(algorithm, {})
         )
-        result = backtest(trained_model_path, test_data_path)
-        result.columns = [algorithm]
+        result = backtest(trained_model_path, test_data_path, algorithm)
         results.append(result)
 
     results.append(get_dji_data(test_start_date, test_end_date))
@@ -286,32 +307,34 @@ if __name__ == '__main__':
     TRAIN_END_DATE = '2020-07-01'
     TRADE_START_DATE = '2020-07-01'
     TRADE_END_DATE = '2021-10-29'
-    # plot_figure = workflow(
-    #     TRAIN_START_DATE, TRAIN_END_DATE,
-    #     TRADE_START_DATE, TRADE_END_DATE,
-    #     algorithm_params={
-    #         "ddpg": {"timesteps": 5, "model_kwargs": {
-    #             "device": "cuda:0", "batch_size": 2048
-    #         }},
-    #         "ppo": {"timesteps": 5, "model_kwargs": {"device": "cuda:0"}}
-    #     }
-    # )
-    # plot_figure.save('portfolio_value.png')
 
-    # plt.savefig(save_folder / "portfolio_value.png")
+    VOLUME_NAME = "finrl"
     volume = cc.volume(VOLUME_NAME)
-    dispatch_id = cc.dispatch(workflow, volume=volume)(
+    runid = cc.dispatch(workflow, volume=volume)(
         TRAIN_START_DATE, TRAIN_END_DATE,
         TRADE_START_DATE, TRADE_END_DATE,
         algorithm_params={
             "ddpg": {
-                "timesteps": 5, "model_kwargs": {
+                "timesteps": 50000, "model_kwargs": {
                     "batch_size": 2048
                 }
             },
             "ppo": {
-                "timesteps": 5, "model_kwargs": {}
+                "timesteps": 50000, "model_kwargs": {}
             }
         }
     )
-    # results = cc.get_result(dispatch_id)
+
+    RUNID_FILE = "runid_status.csv"
+    RESULTS_FILE = "results.csv"
+    update_runid(runid, Status.PENDING, runid_file=RUNID_FILE)
+    print(f"Runid: {runid} Status: {Status.PENDING.value} Updated")
+
+    # Check and update the runid status
+    check_and_update_status(
+        runid_file=RUNID_FILE,
+        results_file=RESULTS_FILE,
+    )
+    print(
+        f"Old runid status updated in {RUNID_FILE} and results written to {RESULTS_FILE}"
+    )

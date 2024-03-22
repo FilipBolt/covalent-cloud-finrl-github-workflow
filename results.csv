@@ -1,0 +1,2 @@
+runid,timestamp,status,result
+3d3f2d85-6f33-422d-b9b3-4d1e53a8a21d,1711111147.4371357,COMPLETED,<module 'matplotlib.pyplot' from '/home/filip/miniconda3/envs/finml/lib/python3.10/site-packages/matplotlib/pyplot.py'>
